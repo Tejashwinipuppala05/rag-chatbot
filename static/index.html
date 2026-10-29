@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Document Q&A</title>
+  <style>
+    :root {
+      --ink: #202426;
+      --muted: #687174;
+      --line: #d9dfdc;
+      --paper: #f6f5f0;
+      --panel: #fffefa;
+      --accent: #d8663d;
+      --accent-dark: #a94329;
+      --user: #e2eee9;
+      --shadow: 0 18px 50px rgba(41, 49, 45, .10);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: Georgia, "Times New Roman", serif;
+    }
+    .shell {
+      width: min(1040px, calc(100% - 32px));
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 48px 0 32px;
+    }
+    header { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 28px; }
+    h1 { margin: 0; font-size: clamp(2.2rem, 5vw, 4.5rem); line-height: .95; font-weight: 500; letter-spacing: 0; }
+    .intro { max-width: 310px; margin: 0; color: var(--muted); font: 15px/1.5 Arial, sans-serif; }
+    .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 18px; align-items: start; }
+    .panel { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .upload { padding: 22px; }
+    .eyebrow { margin: 0 0 10px; color: var(--accent-dark); font: 700 11px/1 Arial, sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+    .upload h2 { margin: 0 0 12px; font-size: 1.35rem; font-weight: 500; }
+    .upload p { color: var(--muted); font: 13px/1.5 Arial, sans-serif; }
+    input[type=file] { width: 100%; margin: 14px 0; font: 12px Arial, sans-serif; }
+    button { border: 0; border-radius: 2px; padding: 12px 16px; color: white; background: var(--accent); cursor: pointer; font: 700 12px Arial, sans-serif; letter-spacing: .04em; text-transform: uppercase; }
+    button:hover { background: var(--accent-dark); }
+    button:disabled { cursor: wait; opacity: .55; }
+    .status { min-height: 42px; margin-top: 16px; color: var(--muted); font: 12px/1.45 Arial, sans-serif; }
+    .chat { min-height: 620px; display: flex; flex-direction: column; }
+    .messages { flex: 1; min-height: 480px; padding: 26px; overflow: auto; }
+    .message { max-width: 82%; margin: 0 0 18px; padding: 14px 16px; border-left: 3px solid var(--accent); background: #f8f7f2; font-size: 1.02rem; line-height: 1.5; }
+    .message.user { margin-left: auto; border-left: 0; border-right: 3px solid #5f8b78; background: var(--user); }
+    .label { display: block; margin-bottom: 5px; color: var(--muted); font: 700 10px Arial, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+    .sources { margin-top: 12px; color: var(--muted); font: 11px/1.45 Arial, sans-serif; }
+    .composer { display: flex; gap: 10px; padding: 16px; border-top: 1px solid var(--line); }
+    textarea { flex: 1; min-height: 48px; resize: vertical; border: 1px solid var(--line); padding: 13px; color: var(--ink); background: white; font: 16px Georgia, serif; }
+    textarea:focus { outline: 2px solid rgba(216, 102, 61, .25); border-color: var(--accent); }
+    @media (max-width: 720px) {
+      .shell { padding-top: 28px; }
+      header { display: block; }
+      .intro { margin-top: 14px; }
+      .workspace { grid-template-columns: 1fr; }
+      .chat { min-height: 560px; }
+      .messages { min-height: 380px; padding: 18px; }
+      .composer { flex-direction: column; }
+      .message { max-width: 94%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <h1>Ask your<br>document.</h1>
+      <p class="intro">Upload a PDF, then have a grounded conversation with the pages inside it.</p>
+    </header>
+    <section class="workspace">
+      <aside class="panel upload">
+        <p class="eyebrow">Document</p>
+        <h2>Bring a PDF into the room.</h2>
+        <p>The document is split, indexed, and saved locally for your next question.</p>
+        <input id="file" type="file" accept="application/pdf,.pdf">
+        <button id="upload" type="button">Upload PDF</button>
+        <div id="status" class="status">No new document uploaded.</div>
+      </aside>
+      <section class="panel chat" aria-label="Document chat">
+        <div id="messages" class="messages">
+          <div class="message"><span class="label">Assistant</span>Your document is ready when you are. Ask a question about its contents.</div>
+        </div>
+        <form id="composer" class="composer">
+          <textarea id="question" placeholder="Ask something about the document..." required minlength="3"></textarea>
+          <button id="send" type="submit">Send</button>
+        </form>
+      </section>
+    </section>
+  </main>
+  <script>
+    const fileInput = document.getElementById('file');
+    const uploadButton = document.getElementById('upload');
+    const status = document.getElementById('status');
+    const messages = document.getElementById('messages');
+    const composer = document.getElementById('composer');
+    const question = document.getElementById('question');
+    const sendButton = document.getElementById('send');
+
+    async function readResponse(response) {
+      const text = await response.text();
+      if (!text) throw new Error(`Request failed (${response.status}).`);
+      try { return JSON.parse(text); }
+      catch { throw new Error(`Request failed (${response.status}): ${text.slice(0, 120)}`); }
+    }
+
+    function addMessage(text, kind, sources) {
+      const message = document.createElement('div');
+      message.className = `message ${kind || ''}`;
+      const label = kind === 'user' ? 'You' : 'Assistant';
+      message.innerHTML = `<span class="label">${label}</span>${text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\n', '<br>')}`;
+      if (sources && sources.length) {
+        const sourceText = sources.map((source) => `${source.source}, page ${source.page}`).join(' | ');
+        message.innerHTML += `<div class="sources">Sources: ${sourceText}</div>`;
+      }
+      messages.appendChild(message);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    uploadButton.addEventListener('click', async () => {
+      const file = fileInput.files[0];
+      if (!file) { status.textContent = 'Choose a PDF first.'; return; }
+      uploadButton.disabled = true;
+      status.textContent = 'Indexing document...';
+      const data = new FormData();
+      data.append('file', file);
+      try {
+        const response = await fetch('/ingest', { method: 'POST', body: data });
+        const result = await readResponse(response);
+        if (!response.ok) throw new Error(result.detail || 'Upload failed.');
+        status.textContent = `${result.filename}: ${result.pages} pages, ${result.chunks} chunks indexed.`;
+        addMessage(`I have indexed ${result.filename}. Ask me anything about it.`, '');
+      } catch (error) {
+        status.textContent = error.message;
+      } finally { uploadButton.disabled = false; }
+    });
+
+    composer.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const text = question.value.trim();
+      if (!text) return;
+      addMessage(text, 'user');
+      question.value = '';
+      sendButton.disabled = true;
+      sendButton.textContent = 'Thinking...';
+      try {
+        const response = await fetch('/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: text, k: 3 })
+        });
+        const result = await readResponse(response);
+        if (!response.ok) throw new Error(result.detail || 'Question failed.');
+        addMessage(result.answer, '', result.sources);
+      } catch (error) { addMessage(error.message, ''); }
+      finally { sendButton.disabled = false; sendButton.textContent = 'Send'; question.focus(); }
+    });
+  </script>
+</body>
+</html>
